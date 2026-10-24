@@ -1,0 +1,26 @@
+# 依赖 / 虚拟环境
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pip-unpack-*/
+
+# 本地环境与数据（绝不提交）
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# 本机 e2e / 临时文件
+.tmp/

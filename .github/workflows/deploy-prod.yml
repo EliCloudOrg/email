@@ -1,0 +1,103 @@
+name: Deploy to production
+
+# 触发：
+#   - push 到 prod 分支（本次不推，等你手动推）
+#   - workflow_dispatch（人工触发，可输入任意 ref：分支 / tag / commit SHA，用于回滚）
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要部署的 Git ref（分支 / tag / commit SHA）。回滚时填上一个可用版本。"
+        required: false
+        default: prod
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  # 阶段一（可选）：构建镜像并推送到 ghcr.io/elicloudorg/email。
+  image:
+    name: Build and push image
+    if: ${{ vars.DEPLOY_MODE == 'image' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 回滚时按 inputs.ref 构建那个版本的代码，而不是触发分支的最新代码。
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Resolve image name and short sha
+        id: meta
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:prod
+            ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 阶段二（必选）：把 deploy.sh 送上服务器并执行。
+  deploy:
+    name: Trigger remote deploy
+    needs: [image]
+    if: ${{ always() && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        # 故意不跟随 inputs.ref：始终用本次 workflow 所在分支的 deploy.sh。
+        # 回滚不应把老部署脚本一起带回来。
+
+      - name: Upload deploy script to /srv/email
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: deploy/deploy.sh
+          target: /srv/email
+          strip_components: 1
+          overwrite: true
+
+      - name: Run /srv/email/deploy.sh
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            set -eu
+            chmod +x /srv/email/deploy.sh
+            /srv/email/deploy.sh "${{ github.event.inputs.ref || 'prod' }}"

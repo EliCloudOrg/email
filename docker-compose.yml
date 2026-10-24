@@ -1,0 +1,24 @@
+# 本地开发编排：build: .，只绑定回环端口 8010，不用于生产。
+# 生产编排由 /srv/email/deploy.sh 生成（拉 ghcr 镜像、数据目录 /home/docker-admin/elicloud/email/data）。
+services:
+  email:
+    build: .
+    image: elicloud-email:dev
+    container_name: email-dev
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8010:8000"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/healthz', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
