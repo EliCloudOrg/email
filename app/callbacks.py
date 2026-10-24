@@ -26,7 +26,6 @@ logger = logging.getLogger("email.callbacks")
 def _delivery_headers(
     secret: str,
     delivery: CallbackDelivery,
-    payload: dict,
     timestamp: int,
     body: bytes,
 ) -> dict[str, str]:
@@ -94,7 +93,7 @@ def deliver_due(
             payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
         ).encode("utf-8")
         headers = _delivery_headers(
-            settings.callback_signing_secret, delivery, payload, timestamp, body
+            settings.callback_signing_secret, delivery, timestamp, body
         )
 
         response: httpx.Response | None = None

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from app import constants as c
 from app.db import init_db, session_scope
 from app.models import CallbackDelivery, VerificationRequest, to_iso, utcnow
 from app.security import sha256_hex, sign_callback, verify_callback
@@ -12,7 +11,6 @@ from app.service import cleanup
 from conftest import (
     auth_headers,
     create_request,
-    csrf_from_page,
     link_from_mailer,
     token_from_link,
     unique_email,
@@ -39,32 +37,14 @@ def test_no_token_in_logs(client, caplog):
     assert token not in caplog.text
 
 
-def test_security_headers_on_page(client):
-    response = create_request(client)
+def test_security_headers_on_result_page(client):
+    create_request(client)
     token = token_from_link(link_from_mailer(client))
     page = client.get("/v1/confirm", params={"token": token})
     assert page.headers["cache-control"] == "no-store"
     assert page.headers["referrer-policy"] == "no-referrer"
     assert page.headers["x-frame-options"] == "DENY"
     assert "default-src 'none'" in page.headers["content-security-policy"]
-
-
-def test_confirm_rate_limit(client):
-    create_request(client)
-    token = token_from_link(link_from_mailer(client))
-    csrf = csrf_from_page(client.get("/v1/confirm", params={"token": token}).text)
-    for _ in range(10):
-        response = client.post(
-            "/v1/confirm",
-            data={"token": token, "decision": "approve", "csrf": "wrong"},
-        )
-        assert response.status_code == 400
-    blocked = client.post(
-        "/v1/confirm",
-        data={"token": token, "decision": "approve", "csrf": "wrong"},
-    )
-    assert blocked.status_code == 429
-    assert "Retry-After" in blocked.headers
 
 
 def test_healthz(client):
@@ -81,13 +61,7 @@ def test_cleanup_removes_old_records(client, settings):
     response = create_request(client)
     request_id = response.json()["id"]
     token = token_from_link(link_from_mailer(client))
-    csrf = csrf_from_page(client.get("/v1/confirm", params={"token": token}).text)
-    assert (
-        client.post(
-            "/v1/confirm", data={"token": token, "decision": "approve", "csrf": csrf}
-        ).status_code
-        == 200
-    )
+    assert client.get("/v1/confirm", params={"token": token}).status_code == 200
 
     db = session_scope()
     try:
@@ -106,9 +80,7 @@ def test_cleanup_removes_old_records(client, settings):
     db = session_scope()
     try:
         assert db.get(VerificationRequest, request_id) is None
-        assert (
-            db.query(CallbackDelivery).filter_by(request_id=request_id).count() == 0
-        )
+        assert db.query(CallbackDelivery).filter_by(request_id=request_id).count() == 0
     finally:
         db.close()
 

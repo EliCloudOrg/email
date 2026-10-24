@@ -130,12 +130,21 @@ def _render_template(
     name = ctx["_template_name"]
     html_text = _HTML_ENV.get_template(f"{name}.html").render(**ctx)
     text_text = _TEXT_ENV.get_template(f"{name}.txt").render(**ctx)
+    link = ctx["link"]
+    if html_text.count(link) != 1:
+        raise ContentError(f"模板 {name}.html 必须且只能包含一个确认链接")
+    if text_text.count(link) != 1:
+        raise ContentError(f"模板 {name}.txt 必须且只能包含一个确认链接")
     subject = TEMPLATE_SUBJECTS.get(name, "{app_name} 邮箱确认").format(
         app_name=settings.app_name
     )
     if len(subject) > MAX_SUBJECT:
         raise ContentError("邮件主题超过 200 字符")
     return subject, html_text, text_text
+
+
+def _count_link(value: str) -> int:
+    return sum(1 for match in _PLACEHOLDER.finditer(value) if match.group(1) == "link")
 
 
 def _render_custom(
@@ -156,6 +165,15 @@ def _render_custom(
             name = match.group(1)
             if name not in values:
                 raise ContentError(f"{label} 里的占位符 {{{{{name}}}}} 未知")
+
+    # 邮件里有且只有一个确认按钮：subject 不允许放链接，
+    # text/html 各自必须且只能出现一次 {{link}}。
+    if _count_link(subject_raw):
+        raise ContentError("subject 不能包含 {{link}}；确认链接只能放在正文")
+    if text_raw is not None and _count_link(text_raw) != 1:
+        raise ContentError("custom text 必须且只能包含一个 {{link}}")
+    if html_raw is not None and _count_link(html_raw) != 1:
+        raise ContentError("custom html 必须且只能包含一个 {{link}}")
 
     def replace(value: str, *, escape: bool) -> str:
         def _sub(match: re.Match[str]) -> str:

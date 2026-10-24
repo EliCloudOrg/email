@@ -1,4 +1,4 @@
-"""token、HMAC、CSRF 与常量时间比较。"""
+"""token、HMAC 与常量时间比较。"""
 
 from __future__ import annotations
 
@@ -12,10 +12,6 @@ from datetime import datetime, timezone
 def new_token() -> str:
     """确认链接里的高熵一次性 token。"""
     return secrets.token_urlsafe(32)
-
-
-def new_csrf_token() -> str:
-    return secrets.token_urlsafe(24)
 
 
 def sha256_hex(value: str) -> str:

@@ -16,7 +16,6 @@ from conftest import (
     TEST_SECRET,
     auth_headers,
     create_request,
-    csrf_from_page,
     link_from_mailer,
     token_from_link,
 )
@@ -27,10 +26,7 @@ def _approve(client):
     assert response.status_code == 202
     request_id = response.json()["id"]
     token = token_from_link(link_from_mailer(client))
-    csrf = csrf_from_page(client.get("/v1/confirm", params={"token": token}).text)
-    result = client.post(
-        "/v1/confirm", data={"token": token, "decision": "approve", "csrf": csrf}
-    )
+    result = client.get("/v1/confirm", params={"token": token})
     assert result.status_code == 200
     return request_id
 
@@ -89,6 +85,8 @@ def test_callback_headers_signature_and_retry(client, settings):
     payload = json.loads(request.content)
     assert payload["request_id"] == request_id
     assert payload["status"] == "approved"
+    assert payload["reason"] == "user_confirm"
+    assert payload["decided_by"] == "user"
     assert payload["metadata"] == {"user_id": "user_0001"}
 
     db = session_scope()
@@ -171,7 +169,7 @@ def test_callback_tampered_url_is_rejected(client):
     assert "rejected" in (delivery.last_error or "")
 
 
-def test_expire_due_creates_expired_callback(client, settings):
+def test_expire_due_creates_timeout_denial(client, settings):
     response = create_request(client)
     request_id = response.json()["id"]
     db = session_scope()
@@ -189,5 +187,8 @@ def test_expire_due_creates_expired_callback(client, settings):
         db.close()
 
     delivery = _delivery(request_id)
-    assert delivery.status == c.STATUS_EXPIRED
-    assert json.loads(delivery.payload_json)["status"] == "expired"
+    payload = json.loads(delivery.payload_json)
+    assert delivery.status == c.STATUS_DENIED
+    assert payload["status"] == "denied"
+    assert payload["reason"] == "timeout"
+    assert payload["decided_by"] == "timeout"

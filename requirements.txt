@@ -8,5 +8,3 @@ email-validator>=2.1,<3.0
 SQLAlchemy>=2.0,<3.0
 httpx>=0.27,<1.0
 Jinja2>=3.1,<4.0
-# /v1/confirm 表单解析（application/x-www-form-urlencoded）
-python-multipart>=0.0.9,<1.0

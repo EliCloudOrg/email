@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 pip-unpack-*/
+email-tests-*/
 
 # 本地环境与数据（绝不提交）
 .env

@@ -1,10 +1,10 @@
-"""公开页面：确认页、结果页、健康检查。"""
+"""公开入口：邮件一键确认、结果页、健康检查。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
@@ -12,10 +12,9 @@ from sqlalchemy.orm import Session
 
 from .. import __version__
 from ..config import Settings
-from ..constants import PURPOSE_LABELS
 from ..db import get_db
 from ..errors import ServiceError, client_ip, limiter
-from ..service import confirm_page, decide
+from ..service import confirm_by_token
 
 router = APIRouter(prefix="/v1", tags=["public"])
 templates = Jinja2Templates(
@@ -24,8 +23,7 @@ templates = Jinja2Templates(
 
 RESULT_MESSAGES = {
     "approved": "邮箱已确认，可以关闭此页面。",
-    "denied": "已拒绝该邮箱确认。",
-    "expired": "链接已过期，请回到原服务重新发起。",
+    "denied": "确认链接已超时，系统已视为拒绝。",
     "failed": "该请求的邮件发送失败，请重新发起。",
 }
 
@@ -75,40 +73,10 @@ def confirm(
     token: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    """邮件里唯一的确认按钮指向这里：GET 即批准；超时则 denied。"""
     if not token:
         return _error_page(request, 400, "缺少确认令牌。")
-    settings: Settings = request.app.state.settings
-    try:
-        state, record, csrf = confirm_page(db, settings, token)
-    except ServiceError as exc:
-        return _error_page(request, exc.status_code, exc.description)
 
-    if state == "pending":
-        return _render(
-            "confirm.html",
-            request,
-            {
-                "title": "确认邮箱",
-                "token": token,
-                "csrf": csrf,
-                "email": record.email,
-                "purpose": record.purpose,
-                "purpose_label": PURPOSE_LABELS.get(record.purpose, record.purpose),
-                "expires_at": record.expires_at,
-                "app_name": settings.app_name,
-            },
-        )
-    return _result_page(request, state, record, status_code=410 if state == "expired" else 200)
-
-
-@router.post("/confirm", response_class=HTMLResponse)
-def submit_confirm(
-    request: Request,
-    token: str = Form(...),
-    decision: str = Form(...),
-    csrf: str = Form(...),
-    db: Session = Depends(get_db),
-) -> HTMLResponse:
     settings: Settings = request.app.state.settings
     ip = client_ip(request, settings) or "unknown"
     retry_after = limiter.allow(f"confirm:{ip}", settings.confirm_rate_limit_per_minute, 60)
@@ -118,11 +86,11 @@ def submit_confirm(
         return response
 
     try:
-        state, record = decide(db, settings, token, decision, csrf, ip)
+        state, record = confirm_by_token(db, settings, token, ip)
     except ServiceError as exc:
         return _error_page(request, exc.status_code, exc.description)
 
-    return _result_page(request, state, record, status_code=410 if state == "expired" else 200)
+    return _result_page(request, state, record, status_code=200)
 
 
 @router.get("/healthz")
