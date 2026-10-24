@@ -129,7 +129,7 @@ EliCloud 内部服务                    email 服务                       用�
 ## 4. 一键确认与 Callback
 
 - 邮件里只有一个按钮，指向 `GET /v1/confirm?token=...`；**GET 即确认**，不再有网页表单或 CSRF。
-- 点击后原子地把 `pending` 改为 `approved`（`decided_by=user`），返回一个只读结果页；重复点击是幂等的，不会重复 callback。
+- 点击后原子地把 `pending` 改为 `approved`（`decided_by=user`），然后**只返回一行纯文本**（如「邮箱确认成功。」），没有页面 UI、CSS 或额外按钮；重复点击是幂等的，不会重复 callback。
 - 超过 `expires_at` 未点击：后台 worker（或用户此时才点链接）把请求置为 `denied`（`decided_by=timeout`），并按配置回调 `reason=timeout`。
 - Callback body：
 
@@ -175,7 +175,7 @@ def verify(secret: str, timestamp: int, body: bytes, signature: str) -> bool:
 - `verification_requests`：id、email、email_lower、purpose、source、callback_url、metadata、content_mode、template_name、token_hash(unique)、status、failure_reason、created_at、expires_at、decided_at、decided_by、decided_ip。
 - `callback_deliveries`：id、request_id、status、payload、callback_url、attempts、next_attempt_at、last_attempt_at、last_status_code、last_error、delivered_at、failed_at、created_at；`UNIQUE(request_id, status)`。
 - SQLite WAL + busy_timeout；单 uvicorn worker；后台线程负责超时拒绝、callback 投递、`RETENTION_DAYS=30` 清理。
-- 确认 token 只存 SHA-256，一次性；页面/日志/回调不回显。
+- 确认 token 只存 SHA-256，一次性；结果/日志/回调不回显。
 - 内部接口 Bearer 常量时间比较；未配置 token 时 fail closed（503）。
 - 确认 GET 按 `X-Real-IP` 限流；响应头 `no-store` / `no-referrer` / `DENY` / CSP。
 - 日志不记 query、token、完整 email；`uvicorn --no-access-log`；只有 `MAIL_MODE=log` 才打印确认链接（仅开发）。

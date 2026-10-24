@@ -32,7 +32,8 @@ def test_confirm_link_approves_directly(client):
     request_id, token = _prepare(client)
     result = client.get("/v1/confirm", params={"token": token})
     assert result.status_code == 200
-    assert "邮箱已确认" in result.text
+    assert result.text == "邮箱确认成功。"
+    assert result.headers["content-type"].startswith("text/plain")
 
     db = session_scope()
     try:
@@ -83,8 +84,8 @@ def test_confirm_after_timeout_is_denied(client):
 
     result = client.get("/v1/confirm", params={"token": token})
     assert result.status_code == 200
-    assert "已超时" in result.text
-    assert "拒绝" in result.text
+    assert result.text == "确认链接已超时，已视为拒绝。"
+    assert result.headers["content-type"].startswith("text/plain")
 
     db = session_scope()
     try:
