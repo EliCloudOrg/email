@@ -1,10 +1,15 @@
-"""业务逻辑：创建验证、确认页、批准/拒绝、过期、清理。"""
+"""业务逻辑：创建验证、邮件按钮确认、超时拒绝、清理。
+
+确认流程刻意做成一键：邮件里只有一个确认按钮（GET 链接），点击即批准；
+超过 ``VERIFICATION_TTL_SECONDS`` 未点击，后台 worker 把请求置为 denied，
+并以 ``reason=timeout`` 回调调用方。
+"""
 
 from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
@@ -16,12 +21,10 @@ from .errors import ServiceError
 from .mailer import MailDeliveryError, Mailer
 from .models import CallbackDelivery, VerificationRequest, dumps_json, parse_iso, to_iso, utcnow
 from .schemas import EmailContent, VerifyCreate, VerifyStatus
-from .security import constant_time_equals, new_csrf_token, new_token, sha256_hex
+from .security import new_token, sha256_hex
 from .urls import validate_callback_url
 
 logger = logging.getLogger("email.service")
-
-MAX_ID_LEN = 64
 
 
 def _new_request_id() -> str:
@@ -91,8 +94,8 @@ def create_verification(
     email_lower = _email_lower(email)
     purpose = (payload.purpose or "generic").strip()
     source = payload.source.strip() if payload.source else None
-    expires_in = payload.expires_in or settings.verification_ttl_seconds
-    expires_at = now + timedelta(seconds=expires_in)
+    timeout_seconds = payload.expires_in or settings.verification_ttl_seconds
+    expires_at = now + timedelta(seconds=timeout_seconds)
 
     callback_url = validate_callback_url(settings, payload.callback_url)
     metadata_json = dumps_json(payload.metadata)
@@ -140,11 +143,11 @@ def create_verification(
         template_name=template_name,
         token_hash=sha256_hex(token),
         status=c.STATUS_PENDING,
-        csrf_hash=None,
         failure_reason=None,
         created_at=now_iso,
         expires_at=to_iso(expires_at),
         decided_at=None,
+        decided_by=None,
         decided_ip=None,
     )
     session.add(record)
@@ -164,11 +167,11 @@ def create_verification(
         ) from exc
 
     logger.info(
-        "verification created id=%s purpose=%s mode=%s ttl=%s",
+        "verification created id=%s purpose=%s mode=%s timeout=%ss",
         request_id,
         purpose,
         content_mode,
-        expires_in,
+        timeout_seconds,
     )
     return record
 
@@ -190,74 +193,27 @@ def get_request_by_token(session: Session, token: str) -> VerificationRequest:
     return record
 
 
-def _expire_record(
-    session: Session, settings: Settings, record: VerificationRequest, now: datetime
-) -> bool:
-    """把仍在 pending 且已过期的记录原子地改成 expired；成功返回 True。"""
-    now_iso = to_iso(now)
-    result = session.execute(
-        update(VerificationRequest)
-        .where(
-            VerificationRequest.id == record.id,
-            VerificationRequest.status == c.STATUS_PENDING,
-            VerificationRequest.expires_at <= now_iso,
-        )
-        .values(status=c.STATUS_EXPIRED, decided_at=now_iso, csrf_hash=None)
-    )
-    if result.rowcount == 0:
-        return False
-    if settings.callback_on_expiry:
-        enqueue_callback(session, settings, record, c.STATUS_EXPIRED, now=now)
-    return True
-
-
-def confirm_page(
-    session: Session, settings: Settings, token: str
-) -> tuple[str, VerificationRequest, str | None]:
-    """返回 (state, record, csrf)。state: pending/approved/denied/expired/failed。"""
-    record = get_request_by_token(session, token)
-    now = utcnow()
-    if record.status != c.STATUS_PENDING:
-        return record.status, record, None
-    if record.expires_at <= to_iso(now):
-        _expire_record(session, settings, record, now)
-        session.commit()
-        session.refresh(record)
-        return record.status, record, None
-    csrf = new_csrf_token()
-    record.csrf_hash = sha256_hex(csrf)
-    session.commit()
-    return c.STATUS_PENDING, record, csrf
-
-
-def decide(
+def confirm_by_token(
     session: Session,
     settings: Settings,
     token: str,
-    decision: str,
-    csrf: str,
     decided_ip: str | None,
+    *,
+    now: datetime | None = None,
 ) -> tuple[str, VerificationRequest]:
-    choice = decision.strip().lower()
-    if choice not in {"approve", "deny"}:
-        raise ServiceError(400, "invalid_decision", "decision 只允许 approve 或 deny")
-    target = c.STATUS_APPROVED if choice == "approve" else c.STATUS_DENIED
+    """邮件按钮点击入口：直接批准；已超时则置为 denied（timeout）。"""
     record = get_request_by_token(session, token)
-    now = utcnow()
-    now_iso = to_iso(now)
+    moment = now or utcnow()
+    now_iso = to_iso(moment)
 
     if record.status != c.STATUS_PENDING:
         return record.status, record
+
     if record.expires_at <= now_iso:
-        _expire_record(session, settings, record, now)
+        _deny_timeout(session, settings, record, moment)
         session.commit()
         session.refresh(record)
         return record.status, record
-
-    if not record.csrf_hash or not constant_time_equals(
-        record.csrf_hash, sha256_hex(csrf.strip())
-    ):
-        raise ServiceError(400, "invalid_csrf", "表单校验失败，请刷新页面后重试")
 
     result = session.execute(
         update(VerificationRequest)
@@ -267,31 +223,59 @@ def decide(
             VerificationRequest.expires_at > now_iso,
         )
         .values(
-            status=target,
+            status=c.STATUS_APPROVED,
             decided_at=now_iso,
+            decided_by=c.DECIDED_BY_USER,
             decided_ip=decided_ip,
-            csrf_hash=None,
         )
     )
     if result.rowcount == 0:
         session.rollback()
         fresh = session.get(VerificationRequest, record.id)
-        if fresh is not None and fresh.status == c.STATUS_PENDING:
-            _expire_record(session, settings, fresh, now)
-            session.commit()
-            session.refresh(fresh)
-            return fresh.status, fresh
-        if fresh is not None:
-            return fresh.status, fresh
-        raise ServiceError(404, "not_found", "验证请求不存在")
+        if fresh is None:
+            raise ServiceError(404, "not_found", "验证请求不存在")
+        return fresh.status, fresh
 
-    enqueue_callback(session, settings, record, target, now=now)
+    enqueue_callback(session, settings, record, c.STATUS_APPROVED, now=moment)
     session.commit()
-    logger.info("verification decided id=%s status=%s", record.id, target)
-    return target, record
+    logger.info("verification confirmed id=%s", record.id)
+    return c.STATUS_APPROVED, record
+
+
+def _deny_timeout(
+    session: Session, settings: Settings, record: VerificationRequest, now: datetime
+) -> bool:
+    """把仍在 pending 且已超时的请求原子地置为 denied（decided_by=timeout）。"""
+    now_iso = to_iso(now)
+    result = session.execute(
+        update(VerificationRequest)
+        .where(
+            VerificationRequest.id == record.id,
+            VerificationRequest.status == c.STATUS_PENDING,
+            VerificationRequest.expires_at <= now_iso,
+        )
+        .values(
+            status=c.STATUS_DENIED,
+            decided_at=record.expires_at,
+            decided_by=c.DECIDED_BY_TIMEOUT,
+            decided_ip=None,
+        )
+    )
+    if result.rowcount == 0:
+        return False
+    if settings.callback_on_timeout:
+        enqueue_callback(
+            session,
+            settings,
+            record,
+            c.STATUS_DENIED,
+            now=parse_iso(record.expires_at),
+        )
+    return True
 
 
 def expire_due(session: Session, settings: Settings, now: datetime | None = None) -> int:
+    """把所有超时未确认的 pending 请求置为 denied；返回条数。"""
     moment = now or utcnow()
     now_iso = to_iso(moment)
     records = list(
@@ -304,14 +288,14 @@ def expire_due(session: Session, settings: Settings, now: datetime | None = None
             .limit(100)
         )
     )
-    expired = 0
+    denied = 0
     for record in records:
-        if _expire_record(session, settings, record, moment):
-            expired += 1
-    if expired:
+        if _deny_timeout(session, settings, record, moment):
+            denied += 1
+    if denied:
         session.commit()
-        logger.info("expired %s verification request(s)", expired)
-    return expired
+        logger.info("timed out %s verification request(s) -> denied", denied)
+    return denied
 
 
 def cleanup(session: Session, settings: Settings, now: datetime | None = None) -> int:
@@ -356,10 +340,22 @@ def enqueue_callback(
         return existing
 
     moment = now or utcnow()
+    if status == c.STATUS_APPROVED:
+        reason = c.CALLBACK_REASON_USER
+        decided_by = c.DECIDED_BY_USER
+    elif status == c.STATUS_DENIED:
+        reason = c.CALLBACK_REASON_TIMEOUT
+        decided_by = c.DECIDED_BY_TIMEOUT
+    else:
+        reason = None
+        decided_by = record.decided_by
+
     payload = {
         "event": c.CALLBACK_EVENT,
         "request_id": record.id,
         "status": status,
+        "reason": reason,
+        "decided_by": decided_by,
         "email": record.email,
         "purpose": record.purpose,
         "source": record.source,
@@ -417,5 +413,6 @@ def status_for(session: Session, record: VerificationRequest) -> VerifyStatus:
         created_at=record.created_at,
         expires_at=record.expires_at,
         decided_at=record.decided_at,
+        decided_by=record.decided_by,
         delivery=delivery_info,
     )

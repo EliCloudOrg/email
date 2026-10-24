@@ -3,8 +3,7 @@
 服务内路由**不带 /email 前缀**（网关剥离，见 README-deploy.md）：
 
     POST /v1/verify           GET /v1/verify/{id}
-    GET  /v1/confirm          POST /v1/confirm
-    GET  /v1/healthz
+    GET  /v1/confirm          GET /v1/healthz
 """
 
 from __future__ import annotations

@@ -112,7 +112,7 @@ def main() -> int:
     request_id = response.json()["id"]
     print(f"\n请求已创建：{request_id}")
     print(f"确认邮件已发往 {args.to}。")
-    print("请打开邮件里的确认链接，在本机浏览器点“确认这是我的邮箱”。")
+    print("请在这台电脑的浏览器打开邮件里唯一的确认按钮；点击即确认（无需网页二次确认）。")
     print(f"等待 callback（最长 {args.timeout}s）...")
 
     deadline = time.time() + args.timeout

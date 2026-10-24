@@ -9,14 +9,17 @@ from __future__ import annotations
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_DENIED = "denied"
-STATUS_EXPIRED = "expired"
 STATUS_FAILED = "failed"
 
-TERMINAL_STATUSES = frozenset(
-    {STATUS_APPROVED, STATUS_DENIED, STATUS_EXPIRED, STATUS_FAILED}
-)
+TERMINAL_STATUSES = frozenset({STATUS_APPROVED, STATUS_DENIED, STATUS_FAILED})
 # 会触发 callback 的状态（failed 不发：邮件都没发出去）
-CALLBACK_STATUSES = frozenset({STATUS_APPROVED, STATUS_DENIED, STATUS_EXPIRED})
+CALLBACK_STATUSES = frozenset({STATUS_APPROVED, STATUS_DENIED})
+
+# ---- 决策来源 / 原因 ------------------------------------------------------
+DECIDED_BY_USER = "user"
+DECIDED_BY_TIMEOUT = "timeout"
+CALLBACK_REASON_USER = "user_confirm"
+CALLBACK_REASON_TIMEOUT = "timeout"
 
 # ---- 邮件内容模式 ---------------------------------------------------------
 CONTENT_MODE_TEMPLATE = "template"

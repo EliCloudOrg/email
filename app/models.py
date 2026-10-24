@@ -62,11 +62,12 @@ class VerificationRequest(Base):
     template_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    csrf_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)
     decided_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # user / timeout（超时未确认 = 拒绝）
+    decided_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (

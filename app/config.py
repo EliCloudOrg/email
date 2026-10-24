@@ -58,7 +58,8 @@ class Settings(BaseSettings):
     callback_max_attempts: int = 6
     callback_retry_schedule: str = DEFAULT_RETRY_SCHEDULE
     callback_timeout_seconds: float = 10.0
-    callback_on_expiry: bool = True
+    # 超时未确认 = 拒绝；是否把这次 deny 结果回调给调用方
+    callback_on_timeout: bool = True
 
     # ---- Worker / 清理 ------------------------------------------------------
     worker_enabled: bool = True

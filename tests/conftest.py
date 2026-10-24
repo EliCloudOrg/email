@@ -36,7 +36,7 @@ os.environ.update(
         "VERIFICATION_TTL_SECONDS": "900",
         "CALLBACK_MAX_ATTEMPTS": "6",
         "CALLBACK_RETRY_SCHEDULE": "0,30,120,600,3600,21600",
-        "CALLBACK_ON_EXPIRY": "true",
+        "CALLBACK_ON_TIMEOUT": "true",
         "RETENTION_DAYS": "30",
         "MAX_ACTIVE_PER_EMAIL": "3",
         "CREATE_COOLDOWN_SECONDS": "60",
@@ -115,12 +115,6 @@ def link_from_mailer(client) -> str:
 
 def token_from_link(link: str) -> str:
     return parse_qs(urlparse(link).query)["token"][0]
-
-
-def csrf_from_page(html: str) -> str:
-    match = re.search(r'name="csrf" value="([^"]+)"', html)
-    assert match, html[:500]
-    return match.group(1)
 
 
 def record_id_from_response(response) -> str:

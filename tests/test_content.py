@@ -8,10 +8,13 @@ from conftest import create_request, link_from_mailer
 
 def test_default_template_subject(client):
     assert create_request(client).status_code == 202
+    link = link_from_mailer(client)
     _to, rendered = client.app.state.mailer.messages[-1]
     assert rendered.subject == "EliCloud 邮箱确认"
-    assert "确认" in rendered.text
-    assert "/v1/confirm?token=" in rendered.html
+    assert rendered.text.count(link) == 1
+    assert rendered.html.count(link) == 1
+    assert rendered.html.count("<a ") == 1
+    assert "超时未确认将视为拒绝" in rendered.text
 
 
 def test_register_template(client):
@@ -20,9 +23,13 @@ def test_register_template(client):
         content={"mode": "template", "template": "register"},
     )
     assert response.status_code == 202, response.text
+    link = link_from_mailer(client)
     _to, rendered = client.app.state.mailer.messages[-1]
     assert "注册" in rendered.subject
     assert "完成 EliCloud 注册" in rendered.html
+    assert rendered.html.count(link) == 1
+    assert rendered.text.count(link) == 1
+    assert rendered.html.count("<a ") == 1
 
     db = session_scope()
     try:
@@ -74,8 +81,8 @@ def test_custom_html_escapes_variables(client):
         content={
             "mode": "custom",
             "subject": "escape",
-            "text": "{{name}}",
-            "html": "<p>{{name}}</p>",
+            "text": "{{name}} {{link}}",
+            "html": "<p>{{name}}</p><a href=\"{{link}}\">go</a>",
             "variables": {"name": "<script>alert(1)</script>"},
         },
     )
@@ -83,6 +90,7 @@ def test_custom_html_escapes_variables(client):
     _to, rendered = client.app.state.mailer.messages[-1]
     assert "&lt;script&gt;" in rendered.html
     assert "<script>" not in rendered.html
+    assert rendered.html.count("<a ") == 1
 
 
 def test_custom_unknown_placeholder(client):
@@ -152,3 +160,34 @@ def test_custom_link_matches_email(client):
     assert response.status_code == 202
     link = link_from_mailer(client)
     assert "token=" in link
+
+
+def test_custom_requires_exactly_one_link(client):
+    missing = create_request(
+        client,
+        content={"mode": "custom", "subject": "x", "text": "no link here"},
+    )
+    assert missing.status_code == 400
+    assert "{{link}}" in missing.json()["error_description"]
+
+    duplicate = create_request(
+        client,
+        content={
+            "mode": "custom",
+            "subject": "x",
+            "text": "{{link}} {{link}}",
+        },
+    )
+    assert duplicate.status_code == 400
+    assert "{{link}}" in duplicate.json()["error_description"]
+
+    subject_link = create_request(
+        client,
+        content={
+            "mode": "custom",
+            "subject": "click {{link}}",
+            "text": "{{link}}",
+        },
+    )
+    assert subject_link.status_code == 400
+    assert "subject" in subject_link.json()["error_description"]

@@ -87,4 +87,5 @@ class VerifyStatus(BaseModel):
     created_at: str
     expires_at: str
     decided_at: str | None = None
+    decided_by: str | None = None
     delivery: DeliveryInfo | None = None
