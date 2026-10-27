@@ -5,8 +5,13 @@
 框架只负责**触发和调用**，不关心项目怎么构建、怎么运行；一切具体部署逻辑都在服务器的
 `/srv/email/deploy.sh` 里。
 
-> **当前初始化状态**：仓库已推 `main` 并跑 CI；`prod` **尚未推送**，生产服务器**尚未改动**
-> （没有 `/srv/email`、没有容器、没有 Caddy 路由）。下面「首次部署」由维护者手动执行。
+> **当前状态（2026-10-27 已上线）**：`prod` 已推送并完成首次部署；服务器上有 `/srv/email`、
+> 容器 `email`（healthy）与 Caddy 的 `/email/*` 路由。下面「首次部署」保留作为操作手册。
+>
+> **镜像源（本机实测差异）**：Actions 仍推 `ghcr.io/elicloudorg/email`；但服务器直连 ghcr.io
+> 拉大层会停在 `Pulling fs layer` 不动，因此 `/srv/email/app.env` 里设了
+> `EMAIL_IMAGE_REPO=ghcr.nju.edu.cn/elicloudorg/email`（公共 ghcr 加速源，包必须保持 public）。
+> 想改回直连只改这一行并重新部署即可。
 
 ## 本项目实际信息
 
