@@ -32,7 +32,7 @@ def test_confirm_link_approves_directly(client):
     request_id, token = _prepare(client)
     result = client.get("/v1/confirm", params={"token": token})
     assert result.status_code == 200
-    assert result.text == "邮箱确认成功。"
+    assert result.text == "邮箱确认成功，请回到 EliCloud 桌面客户端继续。"
     assert result.headers["content-type"].startswith("text/plain")
 
     db = session_scope()
@@ -84,7 +84,7 @@ def test_confirm_after_timeout_is_denied(client):
 
     result = client.get("/v1/confirm", params={"token": token})
     assert result.status_code == 200
-    assert result.text == "确认链接已超时，已视为拒绝。"
+    assert result.text == "确认链接已超时，已视为拒绝。请回到客户端重新发送验证邮件。"
     assert result.headers["content-type"].startswith("text/plain")
 
     db = session_scope()

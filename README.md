@@ -262,13 +262,22 @@ MAIL_FROM=no-reply@elipese.cloud
 
 ## 8. 与 SSO 的关系
 
-本服务只负责“邮箱是不是这个人的、用户是否确认”，不修改 `sso` 仓库。SSO 注册侧后续应：
+本服务只负责“邮箱是不是这个人的、用户是否确认”，不保存账号，也不维护
+`trusted?email=` 全局可信邮箱列表。SSO 注册侧现在的做法：
 
-1. 调 `POST /v1/verify`，带 `purpose=register`、`callback_url`（SSO 内部端点）和 `metadata`（如 `user_id`）；
-2. 在自己的内部回调端点验 HMAC、按 `request_id` 幂等处理；
-3. 只有 `status=approved` 且 `reason=user_confirm` 才把 `email_verified=true` 写回 SSO 用户表；`status=denied`（`reason=timeout`）必须保持未验证。
+1. 调 `POST /v1/verify`，带 `purpose=register`、`source=sso`、
+   `callback_url=http://sso:8000/internal/email/verification` 和
+   `metadata={"registration_id": "reg_..."}`；
+2. 在自己的内部回调端点验 HMAC、按 `registration_id` 幂等处理；
+3. 只有 `status=approved` 且 `reason=user_confirm` 才创建 `sso` 用户并写入
+   `users.email_verified_at`；`status=denied`（`reason=timeout`）必须保持未验证。
 
-在 SSO 这一步落地前，本服务可独立用测试调用方验证全链路。
+部署时 `CALLBACK_ALLOWED_HOSTS` 必须含 `sso`；`MAX_ACTIVE_PER_EMAIL` 建议为 10，
+避免 SSO 的 60 秒重发冷却与默认 3 个 pending 上限冲突；`SMTP_TIMEOUT` 建议为 10 秒，
+SSO 的 `EMAIL_HTTP_TIMEOUT_SECONDS=20` 必须大于它。
+
+确认成功页文案已改为「邮箱确认成功，请回到 EliCloud 桌面客户端继续。」
+本服务仍可独立用测试调用方验证全链路。
 
 ## 9. 部署
 

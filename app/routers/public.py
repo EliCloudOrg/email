@@ -19,9 +19,9 @@ from ..service import confirm_by_token
 router = APIRouter(prefix="/v1", tags=["public"])
 
 RESULT_MESSAGES = {
-    "approved": "邮箱确认成功。",
-    "denied": "确认链接已超时，已视为拒绝。",
-    "failed": "邮件发送失败，请重新发起。",
+    "approved": "邮箱确认成功，请回到 EliCloud 桌面客户端继续。",
+    "denied": "确认链接已超时，已视为拒绝。请回到客户端重新发送验证邮件。",
+    "failed": "邮件发送失败，请回到客户端重新发起。",
 }
 
 
